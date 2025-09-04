@@ -1,0 +1,9 @@
+---
+title: "Does low frequency cause elimination by Elastic Net?"
+author: "Anthe Sevenants"
+date: "2022-12-16, 2022-12-20 and from 2025-09-04 onwards"
+---
+
+Elastic Net regression is a great technique for variable selection. One can pile up many different variables at once and let the Elastic Net figure out which variables are actually interesting and which can be eliminated. If we want to investigate what factors condition Elastic Net elimination, we first need to be sure that this elimination does not correlate with frequency. We want to make sure that, if a specific predictor is eliminated, this is because no specific pattern can be found for that predictor, not because there is simply not enough data to make a meaningful estimation.
+
+I test two types of frequency, frequency in the dataset and frequency in general, with three datasets, a modest dataset, a very large dataset and a stratified dataset.
