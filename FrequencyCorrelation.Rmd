@@ -1,0 +1,342 @@
+---
+title: "Does low frequency cause elimination by Elastic Net?"
+author: "Anthe Sevenants"
+date: "2022-12-16 and 2022-12-20"
+output:
+  html_document:
+    df_print: kable
+    fig_height: 5
+    fig_width: 10
+  pdf_document: default
+  word_document: 
+    df_print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(broom)
+library(ggeffects)
+
+do_perc <- function(numerator, denominator) {
+  prop <- numerator / denominator
+  perc <- prop * 100
+  perc_round <- round(perc)
+  return(perc_round)
+}
+
+df <- read.csv("RG.csv")
+coefficients_output <- read.csv("coefficients.csv")
+coefficients_output$is_eliminated <- ifelse(coefficients_output$coefficient == 0, T, F)
+```
+
+Elastic Net regression is a great technique for variable selection. One can pile up many different variables at once and let the Elastic Net figure out which variables are actually interesting and which can be eliminated. If we want to investigate what factors condition Elastic Net elimination, we first need to be sure that this elimination does not correlate with frequency. I test two types of frequency, frequency in the dataset and frequency in general, with three datasets, a modest dataset, a very large dataset and a stratified dataset.
+
+## Modest dataset
+
+The dataset used here has `r dim(df)[1]` attestations and contains `r dim(coefficients_output)[1]` different features (they are verb participles).
+
+### Share of eliminated features
+
+First, how many features were eliminated in total?
+
+```{r share, echo = FALSE}
+as.data.frame(table(coefficients_output$is_eliminated))
+```
+
+or
+
+```{r share prop, echo = FALSE}
+prop_table <- round(prop.table(table(coefficients_output$is_eliminated)), 2)
+as.data.frame(prop_table)
+```
+
+Only `r prop_table[[1]] * 100`% of predictors were retained.
+
+### Frequency in the dataset
+
+Let's check how often features appear in the dataset.
+
+```{r, echo = FALSE}
+frequencies <- table(df$deelwoord)
+counts <- table(frequencies)
+barplot(counts, main="Verb attestation distribution",
+   xlab="Number of attestations of a verb in the dataset",
+   ylab="Verb count")
+
+
+```
+
+It seems that many verbs only occur once in the entire dataset. `r do_perc(counts[[1]], dim(coefficients_output)[1])`% of verbs are hapaxes. Of course, this makes it difficult for the Elastic Net regression to infer anything about these verbs, since they only have one data point. Now, let's check using a logistic regression how much influence this has on elimination.
+
+```{r, include=FALSE}
+df_frequencies <- as.data.frame(frequencies)
+colnames(df_frequencies) <- c("verb", "frequency")
+
+# Let's add the frequency count of a verb to the coefficients_output
+coefficients_output$db_frequency <- apply(coefficients_output, 1, function(row) {
+  row <- df_frequencies[df_frequencies$verb == row[["feature"]],][1,]
+  return(as.numeric(row[["frequency"]]))
+})
+```
+
+```{r, echo=FALSE}
+model_dataset <- glm(is_eliminated ~ db_frequency, family="binomial", data=coefficients_output)
+tidy(model_dataset)
+```
+
+Indeed, the frequency of a verb in the dataset is important for its survival as a coefficient. As dataset frequency goes up, elimination probability goes down. **This means that careful design of the dataset is necessary in order to safely judge the cause of coefficient elimination.**
+
+Let's check the probability of the elimination of a feature in function of the frequency of that feature:
+
+```{r, echo=FALSE}
+plot(ggeffect(model_dataset, terms="db_frequency"))
+```
+Low frequency items are almost certainly eliminated by the Elastic Net technique. This begs the question: should we ban low frequency items from a dataset in order to be sure that the Elastic Net elimination is actually meaningful?
+
+### Frequency in general
+
+I use the SUBTLEX dataset to estimate the frequency of each verb in our dataset.
+
+```{r, include=FALSE}
+df_subtlex <- read.delim("SUBTLEX.txt", sep="\t")
+
+# Let's add the subtlex frequency count of a verb to the coefficients_output
+coefficients_output$subtlex_frequency <- apply(coefficients_output, 1, function(row) {
+  row <- df_subtlex[df_subtlex$Word == row[["feature"]],][1,]
+  return(as.numeric(row[["FREQcount"]]))
+})
+```
+
+Let's check how often features appear in the SUBTLEX corpus.
+
+```{r, echo = FALSE}
+hist(log(coefficients_output$subtlex_frequency),
+   main="Verb attestation distribution (log scale)",
+   xlab="Frequency of a verb in the SUBTLEX corpus (log scale)",
+   ylab="Verb count")
+```
+Because of the Zipfian distribution of frequency, I used the log scale to transform the frequency information of the verbs. Because of the conversion to the log scale, I won't compare the distribution with the one from within the dataset as I think it doesn't make much sense.
+
+Now, let's check using a logistic regression how much influence this has on elimination:
+
+```{r, echo=FALSE}
+model_subtlex <- glm(is_eliminated ~ subtlex_frequency, family="binomial", data=coefficients_output)
+tidy(model_subtlex)
+```
+
+We see in the output that the regression finds a significant relation between SUBTLEX frequency and elimination probability. However, the effect seems to be unreliable, and this is also apparent from the ggeffects plot:
+
+```{r, echo=FALSE}
+plot(ggeffect(model_subtlex, terms="subtlex_frequency"))
+```
+The exact relation between SUBTLEX frequency and elimination probability is debatable at best, especially because of the very wide confidence intervals as word frequency goes up. In addition, one must remember that high frequency items naturally have a higher chance of appearing in our dataset, which could give a false impression in this analysis.
+
+## Crazy large dataset
+
+```{r, include=FALSE}
+df_crazy <- read.csv("RG_Anthe.csv")
+coefficients_output_crazy <- read.csv("coefficients_big.csv")
+coefficients_output_crazy$is_eliminated <- ifelse(coefficients_output_crazy$coefficient == 0, T, F)
+```
+
+
+The dataset used here has `r dim(df_crazy)[1]` attestations and contains `r dim(coefficients_output_crazy)[1]` different features (they are verb participles).
+
+### Share of eliminated features
+
+First, how many features were eliminated in total?
+
+```{r, echo = FALSE}
+as.data.frame(table(coefficients_output_crazy$is_eliminated))
+```
+
+or
+
+```{r, echo = FALSE}
+prop_table_crazy <- round(prop.table(table(coefficients_output_crazy$is_eliminated)), 2)
+as.data.frame(prop_table_crazy)
+```
+
+`r prop_table_crazy[[1]] * 100`% of predictors were retained. This is more than the `r prop_table[[1]] * 100`% from our modest dataset.
+
+
+### Frequency in the dataset
+
+Let's check how often features appear in the dataset.
+
+```{r, echo = FALSE}
+frequencies_crazy <- table(df_crazy$participle)
+counts_crazy <- table(frequencies_crazy)
+barplot(counts_crazy, main="Verb attestation distribution",
+   xlab="Number of attestations of a verb in the dataset",
+   ylab="Verb count")
+
+
+```
+
+Plotting individual frequencies is no longer of any use here since the dataset has grown too large. It *is* interesting, however, to retain this plot because one can see that even in a dataset of 60,000 records, hapaxes are still extremely common: `r do_perc(counts_crazy[[1]], dim(coefficients_output_crazy)[1])`% of verbs are hapaxes. At the same time, the hapax share is lower than in our modest dataset.
+
+
+```{r, echo = FALSE}
+hist(log(frequencies_crazy),
+   main="Verb attestation distribution (log scale)",
+   xlab="Frequency of a verb in the dataset (log scale)",
+   ylab="Verb count")
+```
+
+The log scale shows the same long tail.
+
+```{r, include=FALSE}
+df_frequencies_crazy <- as.data.frame(frequencies_crazy)
+colnames(df_frequencies_crazy) <- c("verb", "frequency")
+
+# Let's add the frequency count of a verb to the coefficients_output_crazy
+coefficients_output_crazy$db_frequency <- apply(coefficients_output_crazy, 1, function(row) {
+  row <- df_frequencies_crazy[df_frequencies_crazy$verb == row[["feature"]],][1,]
+  return(as.numeric(row[["frequency"]]))
+})
+```
+
+Let's find out how the logistic regression responds to the bigger dataset. I used the log frequency because of a warning in glm ("fitted probabilities numerically 0 or 1 occurred").
+
+```{r, echo=FALSE}
+model_dataset_crazy <- glm(is_eliminated ~ log(db_frequency), family="binomial", data=coefficients_output_crazy)
+tidy(model_dataset_crazy)
+```
+
+The frequency of a verb in the dataset remains important for its survival as a coefficient. As dataset frequency goes up, elimination probability goes down. **This means that just throwing more data onto the problem does not solve our data sparsity issues, and it remains difficult to safely judge the cause of coefficient elimination.**
+
+When we look at the ggeffects plot, we see a sharp drop in elimination probability after around ~100 attestations. In our modest dataset, the dropoff seemed to occur sooner, but this is probably due to the applied log scale (?).
+
+```{r, echo=FALSE}
+plot(ggeffect(model_dataset_crazy, terms="db_frequency"))
+```
+
+### Frequency in general
+
+I again use the SUBTLEX dataset to estimate the frequency of each verb in this large dataset.
+
+```{r, include=FALSE}
+# Let's add the subtlex frequency count of a verb to the coefficients_output_crazy
+coefficients_output_crazy$subtlex_frequency <- apply(coefficients_output_crazy, 1, function(row) {
+  row <- df_subtlex[df_subtlex$Word == row[["feature"]],][1,]
+  return(as.numeric(row[["FREQcount"]]))
+})
+```
+
+Let's check how often features appear in the SUBTLEX corpus.
+
+```{r, echo = FALSE}
+hist(log(coefficients_output_crazy$subtlex_frequency),
+   main="Verb attestation distribution (log scale)",
+   xlab="Frequency of a verb in the SUBTLEX corpus (log scale)",
+   ylab="Verb count")
+```
+
+We see a slightly different distribution than in the modest dataset (there is a more pronounced right tail).
+
+Now, let's check using a logistic regression how much influence this has on elimination:
+
+```{r, echo=FALSE}
+model_subtlex_crazy <- glm(is_eliminated ~ subtlex_frequency, family="binomial", data=coefficients_output_crazy)
+tidy(model_subtlex_crazy)
+```
+
+There is still a significant relation between SUBTLEX frequency and elimination probability. The ggeffects plot is similar to the one from the modest dataset, just at a larger scale.
+
+```{r, echo=FALSE}
+plot(ggeffect(model_subtlex_crazy, terms="subtlex_frequency"))
+```
+
+I would say the relation between SUBTLEX frequency and elimination probability remains debatable, even with our large dataset. The number of hapaxes is still considerable, and increasing the dataset size just increased how many hapaxes the Elastic Net regression has to deal with. Still, we have a lower number of eliminated features, so the dataset size has *some* effect.
+
+## Stratified dataset
+
+In this dataset, all verbs occur equally often. The dataset was made in the following way:
+
+* The "crazy large" dataset was taken as a basis
+* For each frequency count ranging from 10 to 30 in the dataset, 5 verbs were sampled
+  * for example, I took 5 verbs with a frequency of 10, 5 verbs with a frequency of 11 ...
+  * for each of these verbs, I sampled 10 attestations
+* This means that in total, there are $21 \cdot 5 \cdot 30 = `r 21*5*10`$ attestations in the dataset.
+* The question will be: now that all frequencies in the dataset are equal, does frequency in "language" (= in the corpus we sampled from) matter? This data is not available to the Elastic Net regression, so it is completely blind to "real" frequency.
+
+### Frequency in the original, sampled from dataset
+
+First, to confirm the dataset was constructed well, let's check how often features appear in the dataset.
+
+```{r, echo = FALSE}
+df_stratified <- read.csv("RG_Anthe_stratified.csv")
+coefficients_stratified <- read.csv("coefficients_stratified.csv")
+coefficients_stratified$is_eliminated <- ifelse(coefficients_stratified$coefficient == 0, T, F)
+```
+
+```{r, echo = FALSE}
+frequencies_stratified <- table(df_stratified$participle)
+counts_stratified <- table(frequencies_stratified)
+barplot(counts_stratified, main="Verb attestation distribution",
+   xlab="Number of attestations of a verb in the original dataset",
+   ylab="Verb count")
+
+
+```
+All verbs occur 10 times in the dataset, as intended. This means that there are no differences between verbs in the dataset. This is, of course, not a realistic situation, but it does serve as a useful tool for the question we ask.
+
+For the logistic regression, we use the stratified coefficients output, but we bring it into relation with the *real* frequencies from our original dataset. Given that all verb counts in our dataset are equal, there is no correlation between the database frequency and the real frequency, so any effect must be due to the real frequency in the original dataset.
+
+```{r, echo=FALSE}
+model_dataset_stratified <- glm(is_eliminated ~ real_frequency, family="binomial", data=coefficients_stratified)
+tidy(model_dataset_stratified)
+```
+
+We see that the real frequency is no longer a significant predictor. This means that the effects we saw earlier were likely due to in-database frequencies.
+
+This is also visible in the ggeffect plot. There is a downward trend, but as the regression output shows, this effect is not significant.
+
+```{r, echo=FALSE}
+plot(ggeffect(model_dataset_stratified, terms="real_frequency"))
+```
+
+### Frequency in general
+
+To double check, I again use the SUBTLEX dataset to estimate the frequency of each verb. Here again there shouldn't be any correlation between the SUBTLEX frequency and the dataset frequency, so any effect in the analysis should stem from "real" frequency.
+
+```{r, include=FALSE}
+# Let's add the subtlex frequency count of a verb to the coefficients_output_crazy
+coefficients_stratified$subtlex_frequency <- apply(coefficients_stratified, 1, function(row) {
+  row <- df_subtlex[df_stratified$participle == row[["feature"]],][1,]
+  return(as.numeric(row[["FREQcount"]]))
+})
+```
+
+Now, let's check using a logistic regression how much influence the SUBTLEX frequency has on elimination:
+
+```{r, echo=FALSE}
+model_subtlex_stratified <- glm(is_eliminated ~ subtlex_frequency, family="binomial", data=coefficients_stratified)
+tidy(model_subtlex_stratified)
+```
+
+There is still no significant relation between frequency and elimination probability. The ggeffects plot even shows an inverse trend, which doesn't make any sense (which is to be expected given the non-significant effect).
+
+```{r, echo=FALSE}
+plot(ggeffect(model_subtlex_stratified, terms="subtlex_frequency"))
+```
+
+## Discussion and conclusion
+
+### Discussion
+
+These two tests show that indeed, the effects found above were likely to stem from in-database frequencies. Where does this issue come from? The cause is probably the **sparse matrix** we give to the Elastic Net technique. Whereas before (e.g. Van de Velde et al. 2022), Elastic Net was used with quite rich data (each matrix row would contain the frequencies of multiple levels, i.e. authors, at the same time), in lexical effect research, each row is sparse: only one column in each row is activated, and  only with a value of "1". To compensate for the sparsity of this data, we need more data rows.
+
+### Upshot
+
+* Logistic regression finds a significant relation between dataset frequency and elimination probability
+* There is also a significant relation between overall frequency and elimination probability, but this is very likely the result of the correlation between overall frequency and dataset frequency. Indeed, if we keep database frequency constant, overall frequency is no longer a significant predictor for elimination probability.
+* Throwing more data at a problem is not always the solution
+
+### Consequences
+
+Either:
+
+* We should be cautious with the design of our databases and construct them in such a way that no in-database frequencies can tamper with the elimination process
+* We shouldn't try to explain why Elastic Net eliminates certain coefficients, since the reason can be both data scarcity or there actually not being a pull towards a specific alternation.
